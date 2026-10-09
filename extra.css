@@ -1,0 +1,19 @@
+.app{padding-top:env(safe-area-inset-top,0px)}
+.login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;gap:18px;padding:24px 20px;max-width:420px;margin:0 auto}
+.login .brandlogo{height:64px;align-self:flex-start}
+.err{color:var(--badfg);font-size:13.5px}
+.linkbtn{background:none;border:0;color:var(--muted);font-size:14px;text-decoration:underline;cursor:pointer;padding:6px 0;align-self:flex-start}
+a.filterchip{text-decoration:none;color:var(--soft)}
+a.v,.v a{color:var(--fg)}
+.opchip{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 6px 0 12px;border-radius:17px;background:var(--chip);font-size:14px}
+.opchip button{border:0;background:transparent;color:var(--muted);font-size:18px;width:26px;height:26px;cursor:pointer;line-height:1}
+.inline{display:flex;gap:8px;align-items:flex-end}
+.inline > *{flex:1}
+.inline .btn{flex:0 0 auto;width:auto;padding:0 16px;height:46px}
+label.f textarea{background:var(--bg);border:1px solid var(--field);border-radius:12px;color:var(--fg);padding:12px;font-size:15px;font-family:inherit;min-height:80px;resize:vertical}
+.pill.mute{background:transparent;border:1px solid var(--line2);color:var(--muted)}
+.topright{display:flex;gap:8px;align-items:center}
+.iconbtn{width:40px;height:40px;border-radius:20px;border:0;background:var(--surface);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--fg)}
+.small{font-size:12px;color:var(--muted)}
+.check{display:flex;gap:10px;align-items:center;font-size:14px}
+.check input{width:20px;height:20px;accent-color:var(--accent)}
