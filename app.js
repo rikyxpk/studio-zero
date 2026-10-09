@@ -18,6 +18,9 @@ const ic = {
   wa: sv('<path d="M4 20l1.3-3.9A8 8 0 1 1 8 19z"/><path d="M9 9.5c.3 2 2 3.8 4.5 4.5l1-1.2 2 .8c-.2 1.2-1.2 2-2.4 1.8C10.7 15 8.5 12.8 8 9.5 7.9 8.4 8.6 7.4 9.8 7.3l.8 2z"/>', 20),
   chev: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="color:var(--muted);flex-shrink:0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>`,
   out: sv('<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H4"/>', 20),
+  chat: sv('<path d="M4 5h16v11H9l-5 4z"/><circle cx="9" cy="10.5" r=".6" fill="currentColor"/><circle cx="12" cy="10.5" r=".6" fill="currentColor"/><circle cx="15" cy="10.5" r=".6" fill="currentColor"/>', 20),
+  mic: sv('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', 22),
+  send: sv('<path d="M4 12l16-8-6 16-2.5-6.5z"/>', 22),
   refresh: sv('<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>', 20)
 };
 
@@ -33,7 +36,7 @@ const PROFILE_GROUPS = [
 const TYPE_LABEL = { foto: 'Foto', clip: 'Clip', reel: 'Reel' };
 
 // ---------- stato ----------
-const S = { tab: 'home', filter: 'open', evSeg: 'next', meSeg: 'jobs', job: null, sheet: null, toast: null, mode: 'login', err: null, busy: false };
+const S = { chat: [], chatBusy: false, listening: false, tab: 'home', filter: 'open', evSeg: 'next', meSeg: 'jobs', job: null, sheet: null, toast: null, mode: 'login', err: null, busy: false };
 let D = null; // dati
 let session = null;
 
@@ -109,8 +112,8 @@ function loginView() {
   return `<form class="login" id="loginform">
     <div class="brandlogo" role="img" aria-label="Studio Zero"><i class="lw"></i><i class="lr"></i></div>
     <h1 class="h1">${title}</h1>
-    ${m === 'signup' ? '<div class="note">Usa l’email che hai dato a Riky e scegli una password. Ti arriva una mail per confermare.</div>' : ''}
-    ${m !== 'newpass' ? `<label class="f" for="lg-e">Email<input id="lg-e" type="email" autocomplete="email" required></label>` : ''}
+    ${m === 'signup' ? '<div class="note">Scrivi l’email o il numero che hai dato a Riky e scegli una password. Ti arriva una mail per confermare (serve solo la prima volta).</div>' : ''}
+    ${m !== 'newpass' ? `<label class="f" for="lg-e">${m === 'reset' ? 'Email' : 'Email o numero di telefono'}<input id="lg-e" type="${m === 'reset' ? 'email' : 'text'}" autocomplete="username" autocapitalize="off" required></label>` : ''}
     ${m !== 'reset' ? `<label class="f" for="lg-p">Password<input id="lg-p" type="password" autocomplete="${m === 'login' ? 'current-password' : 'new-password'}" minlength="6" required></label>` : ''}
     ${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ''}
     <button class="btn" type="submit" ${S.busy ? 'disabled' : ''}>${m === 'signup' ? 'Crea account' : m === 'reset' ? 'Mandami il link' : m === 'newpass' ? 'Salva password' : 'Entra'}</button>
@@ -118,9 +121,14 @@ function loginView() {
   </form>`;
 }
 async function submitLogin() {
-  const e = document.getElementById('lg-e')?.value.trim(), p = document.getElementById('lg-p')?.value;
+  let e = document.getElementById('lg-e')?.value.trim(); const p = document.getElementById('lg-p')?.value;
   S.busy = true; S.err = null; render();
   let r;
+  if (e && !e.includes('@') && S.mode !== 'newpass') {
+    const { data } = await sb.rpc('login_email', { ident: e });
+    if (!data) { S.busy = false; S.err = 'Numero non trovato nel team, oppure al tuo profilo manca l’email. Chiedi a Riky.'; render(); return; }
+    e = data;
+  }
   if (S.mode === 'login') r = await sb.auth.signInWithPassword({ email: e, password: p });
   else if (S.mode === 'signup') {
     r = await sb.auth.signUp({ email: e, password: p, options: { emailRedirectTo: location.origin } });
@@ -439,6 +447,45 @@ function newPersonSheet() {
   <div class="grid2"><button type="button" class="btn ghost" data-act="close">Annulla</button><button type="submit" class="btn">Aggiungi</button></div></form>`;
 }
 
+// ---------- chat con Claude ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recog = null;
+function chatSheet() {
+  const msgs = S.chat.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'ai'}">${esc(m.content)}</div>`).join('');
+  return `<div class="grab"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center"><h2 class="h2">Chat con Claude</h2><button class="filterchip" data-act="close">Chiudi</button></div>
+  <div class="chatlist" id="ch-list">${msgs || '<div class="note">Scrivi o detta cosa cambiare: “la serata di Viral sabato salta”, “aggiungi un TikTok prima di Freedom”, “Elody ha consegnato le foto di Fuorisede”. Le richieste di modifiche all’app le salvo per la prossima sessione.</div>'}${S.chatBusy ? '<div class="msg ai typing">Sto lavorando…</div>' : ''}</div>
+  <form id="chatform" class="chatbar">
+    ${SR ? `<button type="button" class="iconbtn${S.listening ? ' rec' : ''}" data-act="mic" aria-label="${S.listening ? 'Ferma dettatura' : 'Detta'}">${ic.mic}</button>` : ''}
+    <textarea id="ch-t" rows="1" placeholder="${S.listening ? 'Ti ascolto…' : 'Scrivi a Claude'}" aria-label="Messaggio"></textarea>
+    <button type="submit" class="iconbtn send" aria-label="Invia" ${S.chatBusy ? 'disabled' : ''}>${ic.send}</button>
+  </form>`;
+}
+async function openChat() {
+  S.sheet = ['chat']; render();
+  const { data } = await sb.from('chat_messages').select('role,content').eq('profile_id', D.me.id).order('created_at', { ascending: false }).limit(40);
+  S.chat = (data || []).reverse(); render();
+}
+async function sendChat() {
+  const t = document.getElementById('ch-t'); const msg = t?.value.trim(); if (!msg || S.chatBusy) return;
+  if (recog) { try { recog.stop(); } catch (e) {} }
+  t.value = ''; S.chat.push({ role: 'user', content: msg }); S.chatBusy = true; render();
+  const { data, error } = await sb.functions.invoke('assistente', { body: { message: msg } });
+  S.chatBusy = false;
+  S.chat.push({ role: 'assistant', content: error ? 'Errore: ' + (error.message || error) : (data?.reply || data?.error || '…') });
+  await load().catch(() => {}); render();
+}
+function toggleMic() {
+  if (!SR) return;
+  if (S.listening && recog) { recog.stop(); return; }
+  recog = new SR(); recog.lang = 'it-IT'; recog.interimResults = true; recog.continuous = false;
+  const base = document.getElementById('ch-t')?.value || '';
+  recog.onresult = ev => { const txt = Array.from(ev.results).map(r => r[0].transcript).join(''); const t = document.getElementById('ch-t'); if (t) t.value = (base ? base + ' ' : '') + txt; };
+  recog.onend = () => { S.listening = false; recog = null; render(); };
+  recog.onerror = () => { S.listening = false; };
+  S.listening = true; render(); recog.start();
+}
+
 // ---------- render ----------
 function render() {
   const app = document.getElementById('app'); const navw = document.getElementById('navwrap'); const L = document.getElementById('layer');
@@ -452,7 +499,7 @@ function render() {
   let body = '';
   if (admin) body = S.tab === 'home' ? adminHome() : S.tab === 'events' ? adminEvents() : S.tab === 'team' ? adminTeam() : adminMe();
   else body = S.tab === 'home' ? collabHome() : S.tab === 'jobs' ? (S.job ? '' : '<div class="pad"><h2 class="h2" style="padding-top:4px">I miei lavori</h2></div>') + myJobs(D.me.id) : S.tab === 'board' ? collabBoard() : S.tab === 'money' ? collabMoney() : collabProfile();
-  app.innerHTML = `<div class="top"><div class="brandlogo" role="img" aria-label="Studio Zero"><i class="lw"></i><i class="lr"></i></div><div class="topright"><button class="iconbtn" data-act="refresh" aria-label="Aggiorna">${ic.refresh}</button></div></div>${body}`;
+  app.innerHTML = `<div class="top"><div class="brandlogo" role="img" aria-label="Studio Zero"><i class="lw"></i><i class="lr"></i></div><div class="topright">${admin ? `<button class="iconbtn" data-act="chat" aria-label="Chat con Claude">${ic.chat}</button>` : ''}<button class="iconbtn" data-act="refresh" aria-label="Aggiorna">${ic.refresh}</button></div></div>${body}`;
   navw.hidden = false;
   const n = document.getElementById('nav');
   const b = (tab, label, icon) => `<button class="${S.tab === tab ? 'on' : ''}" aria-label="${label}" data-act="tab" data-id="${tab}" ${S.tab === tab ? 'aria-current="page"' : ''}>${icon}</button>`;
@@ -462,10 +509,12 @@ function render() {
   let sh = '';
   if (S.sheet) {
     const [k, id] = S.sheet;
-    sh = k === 'deliv' ? delivSheet(id) : k === 'ev' ? evSheet(id) : k === 'person' ? personSheet(id) : k === 'post' ? newPostSheet(id) : k === 'newperson' ? newPersonSheet() : newSheet();
+    sh = k === 'chat' ? chatSheet() : k === 'deliv' ? delivSheet(id) : k === 'ev' ? evSheet(id) : k === 'person' ? personSheet(id) : k === 'post' ? newPostSheet(id) : k === 'newperson' ? newPersonSheet() : newSheet();
     const keep = L.querySelector('.sheet')?.scrollTop || 0;
-    L.innerHTML = `<div class="sheet-bg" data-act="bg"><div class="sheet" role="dialog" aria-modal="true">${sh}</div></div>`;
+    const typed = document.getElementById('ch-t')?.value;
+    L.innerHTML = `<div class="sheet-bg" data-act="bg"><div class="sheet${k === 'chat' ? ' chatsheet' : ''}" role="dialog" aria-modal="true">${sh}</div></div>`;
     L.querySelector('.sheet').scrollTop = keep;
+    if (k === 'chat') { const t = document.getElementById('ch-t'); if (typed != null && t) t.value = typed; const l = document.getElementById('ch-list'); if (l) l.scrollTop = l.scrollHeight; }
   } else L.innerHTML = '';
   if (S.toast) L.insertAdjacentHTML('beforeend', `<div class="toast" role="status">${esc(S.toast)}</div>`);
 }
@@ -497,6 +546,8 @@ document.addEventListener('click', async e => {
     case 'cjob': S.tab = isAdmin() ? 'me' : 'jobs'; S.meSeg = 'jobs'; S.job = id; window.scrollTo(0, 0); break;
     case 'closejob': S.job = null; break;
     case 'refresh': return refresh('Dati aggiornati');
+    case 'chat': return openChat();
+    case 'mic': return toggleMic();
     case 'logout': await sb.auth.signOut(); return;
     case 'deliver': {
       const inp = document.getElementById(t.dataset.src || 'wt-' + id); const link = inp ? inp.value.trim() : undefined;
@@ -532,6 +583,7 @@ function confirmNoLink() { return confirm('Non hai incollato nessun link. Segno 
 document.addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target; const v = id => document.getElementById(id)?.value.trim();
   if (f.id === 'loginform') return submitLogin();
+  if (f.id === 'chatform') return sendChat();
   if (f.id === 'personform') return run(sb.from('profiles').update(Object.assign({ phone: v('pf-t') || null }, person(f.dataset.id).is_owner ? {} : { email: v('pf-e') || null })).eq('id', f.dataset.id), 'Salvato');
   if (f.id === 'phoneform') return run(sb.from('profiles').update({ phone: v('me-t') || null }).eq('id', D.me.id), 'Telefono salvato');
   if (f.id === 'evform') return run(sb.from('events').update({ pixieset_prev_url: v('ef-a') || null, instagram_url: v('ef-i') || null, shots_tips: v('ef-t') || null, notes: v('ef-n') || null }).eq('id', f.dataset.id), 'Salvato');
@@ -553,6 +605,7 @@ document.addEventListener('submit', async e => {
     S.sheet = null; return refresh('Serata creata');
   }
 });
+document.addEventListener('keydown', e => { if (e.target.id === 'ch-t' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
 document.addEventListener('change', e => {
   if (e.target.id !== 'nf-f') return;
   const fmt = D.formats.find(x => x.id === e.target.value); if (!fmt) return;
