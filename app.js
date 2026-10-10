@@ -33,7 +33,8 @@ const PROFILE_GROUPS = [
   ['accessories', 'Accessori', ['Trigger', 'Faretto', 'Flash', 'Gimbal', 'Insta360', 'Drone']],
   ['availability', 'Disponibilità', ['Sera', 'Weekend', 'Infrasettimanale', 'Solo un giorno a settimana']]
 ];
-const TYPE_LABEL = { foto: 'Foto', clip: 'Clip', reel: 'Reel' };
+const TYPE_LABEL = { foto: 'Foto', clip: 'Clip', reel: 'Reel', 'clip+reel': 'Clip + Reel' };
+const TYPE_ORDER = ['foto', 'clip', 'reel'];
 
 // ---------- stato ----------
 const S = { chat: [], chatBusy: false, listening: false, tab: 'home', filter: 'open', evSeg: 'next', meSeg: 'jobs', job: null, sheet: null, toast: null, mode: 'login', err: null, busy: false };
@@ -151,6 +152,38 @@ function deliveryRows(list, act = 'deliv') {
     <span class="days" style="color:${dayColor(d)}">${st === 'done' ? '✓' : st === 'late' ? '!' : n}<small>${st === 'done' ? 'fatto' : st === 'late' ? 'ritardo' : n === 1 ? 'giorno' : 'giorni'}</small></span>
     <span class="grow"><span class="t1">${esc(dName(d))}</span><span class="t2">${act === 'deliv' ? esc(p?.name || 'Nessuno') + ' · ' : ''}${st === 'done' ? 'consegnato' : d.due_date ? 'entro ' + fmtShort(d.due_date) : 'senza scadenza'}</span></span>${ic.chev}</button>`; }).join('');
 }
+// una serata entra tra le consegne solo quando è iniziata
+function started(e) {
+  if (!e || e.status === 'saltata') return false;
+  const t = nightToday();
+  if (e.date < t) return true;
+  if (e.date > t) return false;
+  const h = new Date().getHours(); if (h < 6) return true;
+  let sh = e.start_time ? Number(e.start_time.slice(0, 2)) : 21; if (sh < 12) sh += 24;
+  return h >= sh;
+}
+function delGroups(dels) {
+  const m = new Map();
+  dels.forEach(d => { const e = ev(d.event_id); if (!started(e)) return; if (!m.has(e.id)) m.set(e.id, { e, ds: [] }); m.get(e.id).ds.push(d); });
+  return [...m.values()].map(g => {
+    const sts = g.ds.map(dStatus);
+    g.status = sts.includes('late') ? 'late' : sts.every(x => x === 'done') ? 'done' : 'open';
+    g.next = g.ds.filter(d => !d.delivered_at && d.due_date).map(d => d.due_date).sort()[0] || null;
+    g.days = g.next ? diffDays(g.next, TODAY()) : null;
+    g.doneAt = g.ds.map(d => d.delivered_at || '').sort().pop();
+    g.ds.sort((a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type));
+    return g;
+  });
+}
+const sortGroups = (l, done) => l.slice().sort((a, b) => done ? (b.doneAt || '').localeCompare(a.doneAt || '') : (a.next || '9999').localeCompare(b.next || '9999'));
+function groupRows(groups, act) {
+  return groups.map(g => { const st = g.status, n = g.days;
+    const color = st === 'done' ? 'var(--ok)' : st === 'late' ? 'var(--bad)' : n <= 1 ? 'var(--bad)' : n <= 2 ? 'var(--warn)' : 'var(--fg)';
+    const types = g.ds.map(d => `<span style="${d.delivered_at ? 'color:var(--ok)' : dStatus(d) === 'late' ? 'color:var(--bad)' : ''}">${TYPE_LABEL[d.type]}${d.delivered_at ? ' ✓' : ''}</span>`).join(' · ');
+    return `<button class="rowbtn" data-act="${act}" data-id="${g.e.id}">
+    <span class="days" style="color:${color}">${st === 'done' ? '✓' : st === 'late' ? '!' : n}<small>${st === 'done' ? 'fatto' : st === 'late' ? 'ritardo' : n === 1 ? 'giorno' : 'giorni'}</small></span>
+    <span class="grow"><span class="t1">${esc(g.e.name)} <span class="t2" style="font-weight:400">· ${fmtShort(g.e.date)}</span></span><span class="t2">${types}${act === 'delev' ? ' · ' + esc(opsTxt(g.e)) : ''}</span></span>${ic.chev}</button>`; }).join('');
+}
 function refs(e) {
   const c = client(e.client_id) || {};
   const alb = url(e.pixieset_prev_url || c.pixieset_url), insta = url(e.instagram_url || c.instagram_url);
@@ -165,10 +198,10 @@ function notesList() {
 
 // ---------- ADMIN ----------
 function adminHome() {
-  const all = D.del; const f = S.filter;
-  const open = all.filter(d => dStatus(d) === 'open'), late = all.filter(d => dStatus(d) === 'late'), done = all.filter(d => dStatus(d) === 'done');
+  const groups = delGroups(D.del); const f = S.filter;
+  const open = groups.filter(g => g.status === 'open'), late = groups.filter(g => g.status === 'late'), done = groups.filter(g => g.status === 'done');
   const free = D.events.filter(e => e.date >= TODAY() && e.status !== 'saltata' && !opsOf(e.id).length);
-  const list = sortDel(f === 'open' ? open : f === 'late' ? late : f === 'done' ? done.slice().sort((a, b) => b.delivered_at.localeCompare(a.delivered_at)) : all.filter(d => dStatus(d) !== 'done'));
+  const list = f === 'done' ? sortGroups(done, true) : sortGroups(f === 'open' ? open : f === 'late' ? late : groups.filter(g => g.status !== 'done'));
   const label = { open: 'Consegne aperte', late: 'In ritardo', done: 'Consegnate', all: 'Da fare' }[f];
   const st = (key, num, color, txt) => `<button class="stat${f === key ? ' on' : ''}" data-act="filter" data-id="${key}" aria-pressed="${f === key}"><b style="color:${color}">${num}</b><span>${txt}</span></button>`;
   const tn = nightToday();
@@ -180,13 +213,13 @@ function adminHome() {
     ${tonight.map(e => `<button class="rowbtn tonight" data-act="ev" data-id="${e.id}" style="align-items:baseline"><span style="font-family:var(--display);font-weight:900;font-size:24px">${esc((e.venue || e.name).toUpperCase())}</span><span style="font-size:15px;color:var(--soft);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.venue ? e.name : '')}</span><span style="margin-left:auto;text-align:right;display:flex;flex-direction:column;flex-shrink:0"><span class="t1">${esc(opsTxt(e))}</span><span class="t2">${timeTxt(e)}</span></span></button>`).join('') || '<div class="empty" style="padding:14px 0;text-align:left">Nessuna serata stasera.</div>'}
   </div>
   <div class="stats">
-    ${st('open', open.length, 'var(--accent)', 'consegne aperte')}
+    ${st('open', open.length, 'var(--accent)', 'serate da consegnare')}
     ${st('late', late.length, late.length ? 'var(--bad)' : 'var(--ok)', 'in ritardo')}
-    ${st('done', done.length, 'var(--fg)', 'consegnate')}
+    ${st('done', done.length, 'var(--fg)', 'serate consegnate')}
     <button class="stat" data-act="free"><b style="color:${free.length ? 'var(--warn)' : 'var(--ok)'}">${free.length}</b><span>serate da assegnare</span></button>
   </div>
   <div class="sechead"><h2 class="h2">${label}</h2>${f !== 'all' ? '<button class="filterchip" data-act="filter" data-id="all">Mostra tutte</button>' : '<span class="t2">giorni rimasti</span>'}</div>
-  <div class="pad">${deliveryRows(list) || `<div class="empty">${f === 'late' ? 'Nessuna consegna in ritardo.' : 'Niente da mostrare.'}</div>`}</div>
+  <div class="pad">${groupRows(list, 'delev') || `<div class="empty">${f === 'late' ? 'Nessuna consegna in ritardo.' : 'Niente da mostrare.'}</div>`}</div>
   <div class="sechead"><h2 class="h2">Soldi in giro</h2></div>
   <div class="pad grid2" style="padding-top:6px;padding-bottom:20px">
     <div><div style="font-family:var(--display);font-weight:900;font-size:30px;color:var(--warn)">${eur(due)}</div><div class="t2">da incassare dai clienti</div></div>
@@ -271,7 +304,8 @@ function myJobs(pid) {
 function jobDetail(pid, e) {
   if (!e) { S.job = null; return myJobs(pid); }
   const c = client(e.client_id) || {};
-  const ds = D.del.filter(d => d.event_id === e.id && d.assignee_id === pid).sort((a, b) => a.type.localeCompare(b.type));
+  const allDs = D.del.filter(d => d.event_id === e.id && d.assignee_id === pid).sort((a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type));
+  const ds = started(e) ? allDs : [];
   const my = D.asg.find(a => a.event_id === e.id && a.profile_id === pid);
   const f = fin(e.id);
   const showFee = can('fees') && f;
@@ -292,6 +326,7 @@ function jobDetail(pid, e) {
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><span class="t1" style="font-size:16px">${TYPE_LABEL[d.type]}${d.label ? ' · ' + esc(d.label) : ''}</span><span class="t2" style="color:${dayColor(d)}">${st === 'done' ? 'consegnato' : d.due_date ? 'entro ' + fmtShort(d.due_date) + (st === 'late' ? '' : ' · ' + n + ' gg') : ''}</span></div>
       ${st === 'done' ? (d.link ? `<a class="t2" href="${esc(url(d.link))}" target="_blank" rel="noopener" style="word-break:break-all">${esc(d.link)}</a>` : '') : `<label class="f" for="wt-${d.id}">Link ${d.type === 'foto' ? 'Pixieset o WeTransfer' : 'WeTransfer'}<input id="wt-${d.id}" type="url" inputmode="url" placeholder="Incolla qui il link" autocomplete="off" value="${esc(d.link || '')}"></label>`}
       <button class="btn${st === 'done' ? ' done' : ''}" data-act="${st === 'done' ? 'undeliver' : 'deliver'}" data-id="${d.id}">${st === 'done' ? TYPE_LABEL[d.type] + ' consegnato ✓' : 'Consegna ' + TYPE_LABEL[d.type].toLowerCase()}</button></div>`; }).join('')}</div>` : ''}
+  ${!started(e) && allDs.length ? `<div class="block"><div class="k">Consegne dopo la serata</div><div style="font-size:14px">${allDs.map(d => TYPE_LABEL[d.type]).join(' · ')}</div></div>` : ''}
   </div>`;
 }
 
@@ -310,7 +345,7 @@ function accountBlock() {
 // ---------- COLLABORATORE ----------
 function collabHome() {
   const pid = D.me.id; const mine = D.del.filter(d => d.assignee_id === pid);
-  const open = mine.filter(d => !d.delivered_at);
+  const open = sortGroups(delGroups(mine).filter(g => g.status !== 'done'));
   const t = nightToday();
   const nextEv = D.events.find(e => e.date >= t && e.status !== 'saltata' && opsOf(e.id).some(a => a.profile_id === pid));
   const weekEnd = new Date(); weekEnd.setDate(weekEnd.getDate() + 7);
@@ -324,10 +359,10 @@ function collabHome() {
   </div>
   <div class="stats" style="grid-template-columns:repeat(2,minmax(0,1fr))">
     <div class="stat" style="cursor:default"><b>${nWeek}</b><span>serate nei prossimi 7 giorni</span></div>
-    <div class="stat" style="cursor:default"><b style="color:var(--accent)">${open.length}</b><span>consegne da fare</span></div>
+    <div class="stat" style="cursor:default"><b style="color:var(--accent)">${open.length}</b><span>serate da consegnare</span></div>
   </div>
   <div class="sechead"><h2 class="h2">Le tue consegne</h2><span class="t2">giorni rimasti</span></div>
-  <div class="pad">${deliveryRows(sortDel(open), 'cjob') || '<div class="empty">Tutto consegnato.</div>'}</div>`;
+  <div class="pad">${groupRows(open, 'cjob') || '<div class="empty">Tutto consegnato.</div>'}</div>`;
 }
 function collabBoard() {
   const pid = D.me.id;
@@ -363,6 +398,22 @@ function collabProfile() {
 }
 
 // ---------- schede dal basso ----------
+function delEvSheet(id) {
+  const e = ev(id); if (!e) return '';
+  const ds = D.del.filter(d => d.event_id === id).sort((a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type));
+  return `<div class="grab"></div>
+  <div><div class="eyebrow">${fmtLong(e.date)} · ${esc(e.venue || '')}</div><h2 class="h1" style="font-size:26px">${esc(e.name)}</h2><div class="t2" style="padding-top:4px">${esc(opsTxt(e))} · ${esc(serviceTxt(e))}</div></div>
+  ${ds.map(d => { const st = dStatus(d); const p = person(d.assignee_id);
+    const wa = p && !p.is_owner && st !== 'done' ? waLink(p.phone, `Ciao ${p.name}! Promemoria Studio Zero: ${dName(d)} da consegnare entro ${d.due_date ? fmtShort(d.due_date) : 'subito'}. Quando hai il link caricalo nell’app 🙏`) : null;
+    return `<div class="block" style="gap:8px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><span class="t1" style="font-size:17px">${TYPE_LABEL[d.type]}${d.label ? ' · ' + esc(d.label) : ''}</span><span class="t2" style="color:${dayColor(d)}">${st === 'done' ? 'consegnato' : d.due_date ? (st === 'late' ? 'in ritardo · era ' + fmtShort(d.due_date) : 'entro ' + fmtShort(d.due_date) + ' · ' + dDays(d) + ' gg') : ''}</span></div>
+    <div class="t2">${esc(p?.name || 'Nessuno assegnato')}</div>
+    ${st === 'done' ? (d.link ? `<a class="t2" href="${esc(url(d.link))}" target="_blank" rel="noopener" style="word-break:break-all">${esc(d.link)}</a>` : '') : `<label class="f" for="wt-${d.id}">Link ${d.type === 'foto' ? 'Pixieset o WeTransfer' : 'WeTransfer'}<input id="wt-${d.id}" type="url" inputmode="url" placeholder="Incolla qui il link" autocomplete="off" value="${esc(d.link || '')}"></label>`}
+    <button class="btn${st === 'done' ? ' done' : ''}" data-act="${st === 'done' ? 'undeliver' : 'deliver'}" data-id="${d.id}">${st === 'done' ? TYPE_LABEL[d.type] + ' consegnato ✓ · annulla' : 'Consegna ' + TYPE_LABEL[d.type].toLowerCase()}</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="filterchip" data-act="deliv" data-id="${d.id}">Modifica</button>${wa ? `<a class="filterchip" style="display:inline-flex;align-items:center;gap:6px" href="${esc(wa)}" target="_blank" rel="noopener">${ic.wa}Promemoria a ${esc(p.name)}</a>` : ''}</div>
+    </div>`; }).join('') || '<div class="t2">Nessuna consegna</div>'}
+  <div class="grid2"><button class="btn ghost" data-act="ev" data-id="${id}">Scheda serata</button><button class="btn ghost" data-act="close">Chiudi</button></div>`;
+}
 function delivSheet(id) {
   const d = D.del.find(x => x.id === id); if (!d) return '';
   const e = ev(d.event_id); const p = person(d.assignee_id); const st = dStatus(d);
@@ -423,7 +474,7 @@ function newSheet() {
   <div class="grid2"><label class="f" for="nf-d">Data<input id="nf-d" type="date" required value="${nightToday()}"></label><label class="f" for="nf-v">Locale<input id="nf-v"></label></div>
   <div class="grid2"><label class="f" for="nf-s">Inizio<input id="nf-s" type="time"></label><label class="f" for="nf-e">Fine<input id="nf-e" type="time"></label></div>
   <div class="grid2"><label class="f" for="nf-p">Foto<input id="nf-p" placeholder="100"></label><label class="f" for="nf-st">Storie<input id="nf-st" placeholder="6"></label></div>
-  <div class="grid2"><label class="f" for="nf-vid">Video<select id="nf-vid"><option value="">Nessuno</option><option value="clip">Clip</option><option value="reel">Reel</option></select></label><label class="f" for="nf-fee">Compenso cliente €<input id="nf-fee" type="number" inputmode="decimal" min="0" step="1"></label></div>
+  <div class="grid2"><label class="f" for="nf-vid">Video<select id="nf-vid"><option value="">Nessuno</option><option value="clip">Clip</option><option value="reel">Reel</option><option value="clip+reel">Clip + Reel</option></select></label><label class="f" for="nf-fee">Compenso cliente €<input id="nf-fee" type="number" inputmode="decimal" min="0" step="1"></label></div>
   <label class="f" for="nf-a">Assegna a<select id="nf-a"><option value="">Nessuno (resta libera)</option>${D.people.filter(p => p.active).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>
   <label class="check"><input type="checkbox" id="nf-r"> L’edit lo faccio io (trattengo la quota edit)</label>
   <div class="note">Le consegne si creano da sole: foto entro 3 giorni, clip la sera stessa, reel entro 5 giorni.</div>
@@ -509,7 +560,7 @@ function render() {
   let sh = '';
   if (S.sheet) {
     const [k, id] = S.sheet;
-    sh = k === 'chat' ? chatSheet() : k === 'deliv' ? delivSheet(id) : k === 'ev' ? evSheet(id) : k === 'person' ? personSheet(id) : k === 'post' ? newPostSheet(id) : k === 'newperson' ? newPersonSheet() : newSheet();
+    sh = k === 'chat' ? chatSheet() : k === 'delev' ? delEvSheet(id) : k === 'deliv' ? delivSheet(id) : k === 'ev' ? evSheet(id) : k === 'person' ? personSheet(id) : k === 'post' ? newPostSheet(id) : k === 'newperson' ? newPersonSheet() : newSheet();
     const keep = L.querySelector('.sheet')?.scrollTop || 0;
     const typed = document.getElementById('ch-t')?.value;
     L.innerHTML = `<div class="sheet-bg" data-act="bg"><div class="sheet${k === 'chat' ? ' chatsheet' : ''}" role="dialog" aria-modal="true">${sh}</div></div>`;
@@ -535,6 +586,7 @@ document.addEventListener('click', async e => {
     case 'evseg': S.evSeg = id; break;
     case 'meseg': S.meSeg = id; S.job = null; break;
     case 'deliv': S.sheet = ['deliv', id]; break;
+    case 'delev': S.sheet = ['delev', id]; break;
     case 'ev': S.sheet = ['ev', id]; break;
     case 'person': S.sheet = ['person', id]; break;
     case 'new': S.sheet = ['new']; break;
@@ -600,7 +652,7 @@ document.addEventListener('submit', async e => {
     const op = v('nf-a') || null;
     if (op) await sb.from('assignments').insert({ event_id: eid, profile_id: op });
     const dues = []; const add = (type, days) => { const d = parseD(date); d.setDate(d.getDate() + days); dues.push({ event_id: eid, type, due_date: isoLocal(d), assignee_id: op }); };
-    if (photos) add('foto', 3); if (video === 'clip') add('clip', 0); if (video === 'reel') add('reel', 5);
+    if (photos) add('foto', 3); if (video && video.includes('clip')) add('clip', 0); if (video && video.includes('reel')) add('reel', 5);
     if (dues.length) await sb.from('deliverables').insert(dues);
     S.sheet = null; return refresh('Serata creata');
   }
