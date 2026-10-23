@@ -53,6 +53,9 @@ const DOW = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const fmtShort = s => { const d = parseD(s); return `${DOW[d.getDay()].toLowerCase()} ${d.getDate()}`; };
 const fmtLong = s => parseD(s).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/^./, c => c.toUpperCase());
 const hm = t => t ? t.slice(0, 5) : '';
+// orari 24h a mezz'ora, ordinati come una serata (dalle 12:00 alle 11:30 del giorno dopo)
+const HALF = Array.from({ length: 48 }, (_, i) => { const m = (i * 30 + 12 * 60) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + (m % 60 ? '30' : '00'); });
+const timeSel = (id, val) => { const v = hm(val); const list = v && !HALF.includes(v) ? [v, ...HALF] : HALF; return `<select id="${id}"><option value="">–</option>${list.map(x => `<option value="${x}"${x === v ? ' selected' : ''}>${x}</option>`).join('')}</select>`; };
 const timeTxt = e => e.start_time ? hm(e.start_time) + (e.end_time ? '–' + hm(e.end_time) : '') : 'orario da definire';
 const eur = n => n == null ? '–' : (Math.round(n * 100) / 100).toLocaleString('it-IT') + ' €';
 const url = u => { if (!u) return null; return /^https?:\/\//i.test(u) ? u : 'https://' + u; };
@@ -452,6 +455,13 @@ function evSheet(id) {
   <div class="block"><div class="k">Consegne</div>${ds.length ? sortDel(ds).map(x => `<button class="rowbtn" data-act="deliv" data-id="${x.id}" style="padding:8px 0"><span class="grow"><span class="t1" style="font-weight:500">${TYPE_LABEL[x.type]} · ${esc(person(x.assignee_id)?.name || 'nessuno')}</span><span class="t2" style="color:${dayColor(x)}">${dStatus(x) === 'done' ? 'consegnato' : x.due_date ? 'entro ' + fmtShort(x.due_date) : ''}</span></span>${ic.chev}</button>`).join('') : '<div class="t2">Nessuna consegna</div>'}
     <div class="chips" style="padding-top:8px">${['foto', 'clip', 'reel'].map(t => `<button class="chip add" data-act="adddel" data-id="${id}" data-k="${t}">+ ${TYPE_LABEL[t]}</button>`).join('')}</div></div>
   <form id="evform" data-id="${id}" class="stack" style="gap:10px">
+    <div class="k">Dati della serata</div>
+    <label class="f" for="ef-name">Nome<input id="ef-name" value="${esc(e.name || '')}" required></label>
+    <div class="grid2"><label class="f" for="ef-d">Data<input id="ef-d" type="date" value="${e.date}" required></label><label class="f" for="ef-v">Locale<input id="ef-v" value="${esc(e.venue || '')}"></label></div>
+    <div class="grid2"><label class="f" for="ef-s">Inizio${timeSel('ef-s', e.start_time)}</label><label class="f" for="ef-e">Fine${timeSel('ef-e', e.end_time)}</label></div>
+    <div class="grid2"><label class="f" for="ef-p">Foto<input id="ef-p" value="${esc(e.photos || '')}" placeholder="100"></label><label class="f" for="ef-st">Storie<input id="ef-st" value="${esc(e.stories || '')}" placeholder="6"></label></div>
+    <div class="grid2"><label class="f" for="ef-vid">Video<select id="ef-vid">${[['', 'Nessuno'], ['clip', 'Clip'], ['reel', 'Reel'], ['clip+reel', 'Clip + Reel']].map(([v, l]) => `<option value="${v}"${(e.video || '') === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label><label class="f" for="ef-fee">Compenso cliente €<input id="ef-fee" type="number" inputmode="decimal" min="0" step="1" value="${f?.fee != null ? Number(f.fee) : ''}"></label></div>
+    ${ops.filter(a => !person(a.profile_id)?.is_owner).map(a => `<label class="f" for="ef-op-${a.id}">Cachet ${esc(person(a.profile_id)?.name)} €<input id="ef-op-${a.id}" data-asg="${a.id}" type="number" inputmode="decimal" min="0" step="1" value="${a.operator_fee != null ? Number(a.operator_fee) : ''}"></label>`).join('')}
     <label class="f" for="ef-a">Link album precedente (Pixieset)<input id="ef-a" type="url" value="${esc(e.pixieset_prev_url || '')}" placeholder="https://…pixieset.com/…"></label>
     <label class="f" for="ef-i">Instagram della serata<input id="ef-i" type="url" value="${esc(e.instagram_url || '')}" placeholder="https://instagram.com/…"></label>
     <label class="f" for="ef-t">Scatti consigliati / cosa vogliono<textarea id="ef-t">${esc(e.shots_tips || '')}</textarea></label>
@@ -472,7 +482,7 @@ function newSheet() {
   <label class="f" for="nf-f">Serata<select id="nf-f"><option value="">Nuova (scrivi il nome)</option>${opts}</select></label>
   <label class="f" for="nf-n" id="nf-nl">Nome<input id="nf-n" placeholder="Nome serata"></label>
   <div class="grid2"><label class="f" for="nf-d">Data<input id="nf-d" type="date" required value="${nightToday()}"></label><label class="f" for="nf-v">Locale<input id="nf-v"></label></div>
-  <div class="grid2"><label class="f" for="nf-s">Inizio<input id="nf-s" type="time"></label><label class="f" for="nf-e">Fine<input id="nf-e" type="time"></label></div>
+  <div class="grid2"><label class="f" for="nf-s">Inizio${timeSel('nf-s')}</label><label class="f" for="nf-e">Fine${timeSel('nf-e')}</label></div>
   <div class="grid2"><label class="f" for="nf-p">Foto<input id="nf-p" placeholder="100"></label><label class="f" for="nf-st">Storie<input id="nf-st" placeholder="6"></label></div>
   <div class="grid2"><label class="f" for="nf-vid">Video<select id="nf-vid"><option value="">Nessuno</option><option value="clip">Clip</option><option value="reel">Reel</option><option value="clip+reel">Clip + Reel</option></select></label><label class="f" for="nf-fee">Compenso cliente €<input id="nf-fee" type="number" inputmode="decimal" min="0" step="1"></label></div>
   <label class="f" for="nf-a">Assegna a<select id="nf-a"><option value="">Nessuno (resta libera)</option>${D.people.filter(p => p.active).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>
@@ -638,7 +648,19 @@ document.addEventListener('submit', async e => {
   if (f.id === 'chatform') return sendChat();
   if (f.id === 'personform') return run(sb.from('profiles').update(Object.assign({ phone: v('pf-t') || null }, person(f.dataset.id).is_owner ? {} : { email: v('pf-e') || null })).eq('id', f.dataset.id), 'Salvato');
   if (f.id === 'phoneform') return run(sb.from('profiles').update({ phone: v('me-t') || null }).eq('id', D.me.id), 'Telefono salvato');
-  if (f.id === 'evform') return run(sb.from('events').update({ pixieset_prev_url: v('ef-a') || null, instagram_url: v('ef-i') || null, shots_tips: v('ef-t') || null, notes: v('ef-n') || null }).eq('id', f.dataset.id), 'Salvato');
+  if (f.id === 'evform') {
+    const id = f.dataset.id; const num = x => x === '' || x == null ? null : Number(x); const oldDate = ev(id)?.date;
+    const r = await sb.from('events').update({ name: v('ef-name'), date: v('ef-d'), venue: v('ef-v') || null, start_time: v('ef-s') || null, end_time: v('ef-e') || null, photos: v('ef-p') || null, stories: v('ef-st') || null, video: v('ef-vid') || null, pixieset_prev_url: v('ef-a') || null, instagram_url: v('ef-i') || null, shots_tips: v('ef-t') || null, notes: v('ef-n') || null }).eq('id', id);
+    if (r.error) return toast('Errore: ' + r.error.message);
+    // se cambia la data, sposto le scadenze delle consegne ancora aperte dello stesso numero di giorni
+    if (oldDate && v('ef-d') && v('ef-d') !== oldDate) { const shift = Math.round((parseD(v('ef-d')) - parseD(oldDate)) / 864e5);
+      for (const x of D.del.filter(x => x.event_id === id && !x.delivered_at && x.due_date)) { const d = parseD(x.due_date); d.setDate(d.getDate() + shift); await sb.from('deliverables').update({ due_date: isoLocal(d) }).eq('id', x.id); } }
+    const fee = num(v('ef-fee'));
+    const rf = fin(id) ? await sb.from('event_finance').update({ fee }).eq('event_id', id) : await sb.from('event_finance').insert({ event_id: id, fee });
+    if (rf.error) return toast('Errore compenso: ' + rf.error.message);
+    for (const el of f.querySelectorAll('[data-asg]')) { const ra = await sb.from('assignments').update({ operator_fee: num(el.value.trim()) }).eq('id', el.dataset.asg); if (ra.error) return toast('Errore cachet: ' + ra.error.message); }
+    return refresh('Serata aggiornata');
+  }
   if (f.id === 'npform') { S.sheet = null; const name = v('nn-n'); return run(sb.from('profiles').insert({ name, initials: name[0].toUpperCase(), email: v('nn-e') || null, phone: v('nn-t') || null }), name + ' aggiunto al team'); }
   if (f.id === 'postform') { S.sheet = null; return run(sb.from('board_posts').insert({ title: v('np-t'), description: v('np-d') || null, date: v('np-g') || null, operator_fee: v('np-f') ? Number(v('np-f')) : null, event_id: f.dataset.ev || null }), 'Richiesta pubblicata'); }
   if (f.id === 'newform') {
