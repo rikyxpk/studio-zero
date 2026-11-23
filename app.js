@@ -37,7 +37,7 @@ const TYPE_LABEL = { foto: 'Foto', clip: 'Clip', reel: 'Reel', 'clip+reel': 'Cli
 const TYPE_ORDER = ['foto', 'clip', 'reel'];
 
 // ---------- stato ----------
-const S = { chat: [], chatBusy: false, listening: false, tab: 'home', filter: 'open', evSeg: 'next', meSeg: 'jobs', job: null, sheet: null, toast: null, mode: 'login', err: null, busy: false };
+const S = { chat: [], chatBusy: false, listening: false, tab: 'home', filter: 'open', evSeg: 'cal', calM: null, calD: null, meSeg: 'jobs', job: null, sheet: null, toast: null, mode: 'login', err: null, busy: false };
 let D = null; // dati
 let session = null;
 
@@ -237,10 +237,42 @@ function eventRows(list) {
     <span class="grow"><span class="t1">${esc(e.name)}</span><span class="t2">${esc(e.venue || '–')} · ${timeTxt(e)}</span></span>
     <span class="pill${sk ? ' bad' : e.status === 'da_confermare' ? ' mute' : o ? '' : ' warn'}">${sk ? 'Saltata' : e.status === 'da_confermare' ? 'Da confermare' : esc(opsTxt(e))}</span></button>`; }).join('');
 }
+// ---------- calendario ----------
+const MONTHS = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+const evTone = e => e.status === 'saltata' ? 'sk' : e.status === 'da_confermare' ? 'tbc' : opsOf(e.id).length ? 'ok' : 'free';
+function calendarView() {
+  const t = nightToday();
+  if (!S.calM) S.calM = t.slice(0, 7);
+  if (!S.calD) S.calD = t;
+  const [y, m] = S.calM.split('-').map(Number);
+  const first = new Date(y, m - 1, 1); const lead = (first.getDay() + 6) % 7; const days = new Date(y, m, 0).getDate();
+  const byDay = {}; D.events.forEach(e => (byDay[e.date] = byDay[e.date] || []).push(e));
+  const inMonth = D.events.filter(e => e.date.startsWith(S.calM) && e.status !== 'saltata');
+  const freeN = inMonth.filter(e => !opsOf(e.id).length).length;
+  let cells = '';
+  for (let i = 0; i < lead; i++) cells += '<span class="cal-c empty-c"></span>';
+  for (let d = 1; d <= days; d++) {
+    const iso = `${S.calM}-${pad2(d)}`; const list = byDay[iso] || [];
+    const tags = list.slice(0, 3).map(e => `<i class="cal-t ${evTone(e)}">${esc((e.venue || e.name).slice(0, 9))}</i>`).join('') + (list.length > 3 ? `<i class="cal-more">+${list.length - 3}</i>` : '');
+    const cls = ['cal-c', iso === t ? 'today' : '', iso === S.calD ? 'sel' : '', iso < t ? 'past' : ''].filter(Boolean).join(' ');
+    cells += `<button class="${cls}" data-act="calday" data-id="${iso}" aria-label="${fmtLong(iso)}: ${list.length} serate"><b>${d}</b>${tags}</button>`;
+  }
+  const dayList = (byDay[S.calD] || []).slice().sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+  return `<div class="pad"><div class="cal-head"><button class="iconbtn" data-act="calm" data-id="-1" aria-label="Mese precedente">${ic.back}</button>
+    <div style="text-align:center"><div class="h2" style="margin:0">${MONTHS[m - 1]} ${y}</div><div class="t2">${inMonth.length} serate${freeN ? ` · <span style="color:var(--warn)">${freeN} da assegnare</span>` : ''}</div></div>
+    <button class="iconbtn" data-act="calm" data-id="1" aria-label="Mese successivo" style="transform:scaleX(-1)">${ic.back}</button></div>
+  <div class="cal-grid">${['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(x => `<span class="cal-w">${x}</span>`).join('')}${cells}</div>
+  <div class="cal-leg"><span><i class="dot ok"></i>assegnata</span><span><i class="dot free"></i>da assegnare</span><span><i class="dot tbc"></i>da confermare</span><span><i class="dot sk"></i>saltata</span></div>
+  ${S.calM !== t.slice(0, 7) ? '<button class="filterchip" data-act="caltoday" style="margin-top:8px">Torna a oggi</button>' : ''}</div>
+  <div class="sechead"><h2 class="h2">${fmtLong(S.calD)}</h2><span class="t2">${dayList.length ? dayList.length + (dayList.length === 1 ? ' serata' : ' serate') : ''}</span></div>
+  <div class="pad">${eventRows(dayList) || '<div class="empty" style="padding:14px 0">Nessuna serata in questo giorno.</div>'}
+  <button class="btn ghost" data-act="newon" data-id="${S.calD}" style="margin:12px 0 20px">+ Nuova serata il ${fmtShort(S.calD)}</button></div>`;
+}
 function adminEvents() {
-  const segs = [['next', 'Prossime'], ['free', 'Da assegnare'], ['past', 'Passate'], ['board', 'Bacheca']];
+  const segs = [['cal', 'Calendario'], ['next', 'Prossime'], ['free', 'Da assegnare'], ['past', 'Passate'], ['board', 'Bacheca']];
   const seg = `<div class="seg">${segs.map(([k, l]) => `<button class="${S.evSeg === k ? 'on' : ''}" data-act="evseg" data-id="${k}">${l}</button>`).join('')}</div>`;
   if (S.evSeg === 'board') return seg + boardAdmin();
+  if (S.evSeg === 'cal') return seg + calendarView();
   const t = nightToday();
   let list = S.evSeg === 'past' ? D.events.filter(e => e.date < t).reverse() : D.events.filter(e => e.date >= t);
   if (S.evSeg === 'free') list = list.filter(e => e.status !== 'saltata' && !opsOf(e.id).length);
@@ -475,13 +507,13 @@ function evSheet(id) {
   <button class="btn ghost" data-act="close">Chiudi</button>`;
 }
 
-function newSheet() {
+function newSheet(day) {
   const opts = D.formats.map(f => `<option value="${f.id}">${esc(f.name)}${f.venue ? ' · ' + esc(f.venue) : ''}</option>`).join('');
   return `<div class="grab"></div><h2 class="h2">Nuova serata</h2>
   <form id="newform" class="stack" style="gap:12px">
   <label class="f" for="nf-f">Serata<select id="nf-f"><option value="">Nuova (scrivi il nome)</option>${opts}</select></label>
   <label class="f" for="nf-n" id="nf-nl">Nome<input id="nf-n" placeholder="Nome serata"></label>
-  <div class="grid2"><label class="f" for="nf-d">Data<input id="nf-d" type="date" required value="${nightToday()}"></label><label class="f" for="nf-v">Locale<input id="nf-v"></label></div>
+  <div class="grid2"><label class="f" for="nf-d">Data<input id="nf-d" type="date" required value="${day || nightToday()}"></label><label class="f" for="nf-v">Locale<input id="nf-v"></label></div>
   <div class="grid2"><label class="f" for="nf-s">Inizio${timeSel('nf-s')}</label><label class="f" for="nf-e">Fine${timeSel('nf-e')}</label></div>
   <div class="grid2"><label class="f" for="nf-p">Foto<input id="nf-p" placeholder="100"></label><label class="f" for="nf-st">Storie<input id="nf-st" placeholder="6"></label></div>
   <div class="grid2"><label class="f" for="nf-vid">Video<select id="nf-vid"><option value="">Nessuno</option><option value="clip">Clip</option><option value="reel">Reel</option><option value="clip+reel">Clip + Reel</option></select></label><label class="f" for="nf-fee">Compenso cliente €<input id="nf-fee" type="number" inputmode="decimal" min="0" step="1"></label></div>
@@ -570,7 +602,7 @@ function render() {
   let sh = '';
   if (S.sheet) {
     const [k, id] = S.sheet;
-    sh = k === 'chat' ? chatSheet() : k === 'delev' ? delEvSheet(id) : k === 'deliv' ? delivSheet(id) : k === 'ev' ? evSheet(id) : k === 'person' ? personSheet(id) : k === 'post' ? newPostSheet(id) : k === 'newperson' ? newPersonSheet() : newSheet();
+    sh = k === 'chat' ? chatSheet() : k === 'delev' ? delEvSheet(id) : k === 'deliv' ? delivSheet(id) : k === 'ev' ? evSheet(id) : k === 'person' ? personSheet(id) : k === 'post' ? newPostSheet(id) : k === 'newperson' ? newPersonSheet() : newSheet(id);
     const keep = L.querySelector('.sheet')?.scrollTop || 0;
     const typed = document.getElementById('ch-t')?.value;
     L.innerHTML = `<div class="sheet-bg" data-act="bg"><div class="sheet${k === 'chat' ? ' chatsheet' : ''}" role="dialog" aria-modal="true">${sh}</div></div>`;
@@ -600,6 +632,10 @@ document.addEventListener('click', async e => {
     case 'ev': S.sheet = ['ev', id]; break;
     case 'person': S.sheet = ['person', id]; break;
     case 'new': S.sheet = ['new']; break;
+    case 'newon': S.sheet = ['new', id]; break;
+    case 'calday': S.calD = id; break;
+    case 'caltoday': S.calM = null; S.calD = null; break;
+    case 'calm': { const [cy, cm] = S.calM.split('-').map(Number); const nd = new Date(cy, cm - 1 + Number(id), 1); S.calM = isoLocal(nd).slice(0, 7); const td = nightToday(); S.calD = S.calM === td.slice(0, 7) ? td : S.calM + '-01'; break; }
     case 'newpost': S.sheet = ['post', null]; break;
     case 'topost': S.sheet = ['post', id]; break;
     case 'newperson': S.sheet = ['newperson']; break;
@@ -685,7 +721,7 @@ document.addEventListener('change', e => {
   const fmt = D.formats.find(x => x.id === e.target.value); if (!fmt) return;
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
   set('nf-n', fmt.name); set('nf-v', fmt.venue); set('nf-s', hm(fmt.start_time)); set('nf-e', hm(fmt.end_time)); set('nf-p', fmt.photos); set('nf-st', fmt.stories); set('nf-vid', fmt.video); set('nf-fee', fmt.fee);
-  if (fmt.weekday) { const d = new Date(); const want = fmt.weekday % 7; while (d.getDay() !== want) d.setDate(d.getDate() + 1); set('nf-d', isoLocal(d)); }
+  if (fmt.weekday && !(S.sheet && S.sheet[1])) { const d = new Date(); const want = fmt.weekday % 7; while (d.getDay() !== want) d.setDate(d.getDate() + 1); set('nf-d', isoLocal(d)); }
 });
 
 // ---------- avvio ----------
