@@ -27,3 +27,25 @@ label.f textarea{background:var(--bg);border:1px solid var(--field);border-radiu
 .chatbar textarea{flex:1;background:var(--bg);border:1px solid var(--field);border-radius:20px;color:var(--fg);padding:10px 14px;font-size:16px;font-family:inherit;resize:none;max-height:120px}
 .iconbtn.send{background:var(--accent);color:#fff}
 .iconbtn.rec{background:var(--bad);color:#fff}
+
+/* calendario eventi (admin) */
+.cal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0 10px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
+.cal-w{font-size:11px;color:var(--muted);text-align:center;padding:2px 0 4px;font-weight:600}
+.cal-c{min-height:64px;background:var(--surface);border:1px solid transparent;border-radius:8px;padding:4px 3px;display:flex;flex-direction:column;align-items:stretch;gap:2px;cursor:pointer;text-align:left;overflow:hidden}
+.cal-c.empty-c{background:transparent;cursor:default}
+.cal-c b{font-family:var(--display);font-weight:800;font-size:13px;line-height:1;padding:0 1px 2px}
+.cal-c.past{opacity:.55}
+.cal-c.today b{color:var(--accent)}
+.cal-c.today{border-color:var(--accent)}
+.cal-c.sel{border-color:var(--fg);opacity:1}
+.cal-t{font-style:normal;font-size:9.5px;line-height:1.25;font-weight:600;border-radius:4px;padding:1px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-t.ok{background:var(--okbg);color:var(--okfg)}
+.cal-t.free{background:var(--warnbg);color:var(--warn)}
+.cal-t.tbc{background:var(--chip);color:var(--muted)}
+.cal-t.sk{background:var(--badbg);color:var(--badfg);text-decoration:line-through}
+.cal-more{font-style:normal;font-size:9.5px;color:var(--muted);padding:0 3px}
+.cal-leg{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11.5px;color:var(--muted);padding-top:10px}
+.cal-leg span{display:flex;align-items:center;gap:5px}
+.cal-leg .dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+.dot.ok{background:var(--ok)}.dot.free{background:var(--warn)}.dot.tbc{background:var(--line2)}.dot.sk{background:var(--bad)}
